@@ -1,296 +1,310 @@
 #include "big_integer.h"
-#include <algorithm>
-#include <stdexcept>
-#include <utility>
-long long BigInteger::mod(long long a, long long b) const{
-    return ((a % b) + b) % b;
+static int cmp_abs(const std::vector<int>& a, const std::vector<int>& b) {
+ if (a.size() != b.size()) {
+ return a.size() < b.size() ? -1 : 1;
+ }
+ for (int i = static_cast<int>(a.size()) - 1; i >= 0; --i) {
+ if (a[static_cast<size_t>(i)] != b[static_cast<size_t>(i)]) {
+ return a[static_cast<size_t>(i)] < b[static_cast<size_t>(i)] ? -1 : 1;
+ }
+ }
+ return 0;
 }
-BigInteger::BigInteger(): negative_(0){
-    digits_.push_back(0);
+static void add_abs(std::vector<int>& a, const std::vector<int>& b) {
+ int carry = 0;
+ size_t max_size = a.size() > b.size() ? a.size() : b.size();
+ a.resize(max_size + 1, 0);
+ for (size_t i = 0; i < max_size; ++i) {
+ int sum = a[i] + (i < b.size() ? b[i] : 0) + carry;
+ a[i] = sum % 10;
+ carry = sum / 10;
+ }
+ if (carry > 0) {
+ a[max_size] = carry;
+ } else {
+ while (a.size() > 1 && a.back() == 0) {
+ a.pop_back();
+ }
+ }
 }
-BigInteger::BigInteger(int value): negative_(value < 0){
-    long long val = std::abs(static_cast<long long>(value));
-    do {
-        digits_.push_back(mod(val, 10));
-        val /= 10;
-    } while (val > 0);
+static void sub_abs(std::vector<int>& a, const std::vector<int>& b) {
+ int borrow = 0;
+ for (size_t i = 0; i < a.size(); ++i) {
+ int diff = a[i] - (i < b.size() ? b[i] : 0) - borrow;
+ if (diff < 0) {
+ diff += 10;
+ borrow = 1;
+ } else {
+ borrow = 0;
+ }
+ a[i] = diff;
+ }
+ while (a.size() > 1 && a.back() == 0) {
+ a.pop_back();
+ }
 }
-BigInteger::BigInteger(long long value): negative_(value < 0){
-    value = std::abs(value);
-    do {
-        digits_.push_back(mod(value, 10));
-        value /= 10;
-    } while (value > 0);
+static void mul_abs(std::vector<int>& a, const std::vector<int>& b) {
+ std::vector<int> result(a.size() + b.size(), 0);
+ for (size_t i = 0; i < a.size(); ++i) {
+ int carry = 0;
+ for (size_t j = 0; j < b.size(); ++j) {
+ int prod = result[i + j] + a[i] * b[j] + carry;
+ result[i + j] = prod % 10;
+ carry = prod / 10;
+ }
+ if (carry > 0) {
+ result[i + b.size()] += carry;
+ }
+ }
+ while (result.size() > 1 && result.back() == 0) {
+ result.pop_back();
+ }
+ a = result;
 }
-BigInteger::BigInteger(const std::string& str): negative_(false) {
-    size_t start = 0;
-    if (str[0] == '-' || str[0] == '+'){
-        negative_ = (str[0] == '-');
-        start = 1;
-    }
-    while (start + 1 < str.size() && str[start] == '0'){
-        ++start;
-    }
-    for (size_t i = str.size(); i > start; --i){
-        digits_.push_back(str[i - 1] - '0');
-    }
+static std::vector<int> div_mod_abs(std::vector<int>& dividend,
+ const std::vector<int>& divisor) {
+ std::vector<int> quotient;
+ std::vector<int> remainder;
+ for (int i = static_cast<int>(dividend.size()) - 1; i >= 0; --i) {
+ remainder.insert(remainder.begin(), dividend[static_cast<size_t>(i)]);
+ while (remainder.size() > 1 && remainder.back() == 0) {
+ remainder.pop_back();
+ }
+ int digit = 0;
+ for (int d = 9; d >= 1; --d) {
+ std::vector<int> temp = divisor;
+ int carry = 0;
+ for (size_t j = 0; j < temp.size(); ++j) {
+ int prod = temp[j] * d + carry;
+ temp[j] = prod % 10;
+ carry = prod / 10;
+ }
+ while (carry > 0) {
+ temp.push_back(carry % 10);
+ carry /= 10;
+ }
+ while (temp.size() > 1 && temp.back() == 0) {
+ temp.pop_back();
+ }
+ if (cmp_abs(temp, remainder) <= 0) {
+ digit = d;
+ sub_abs(remainder, temp);
+ break;
+ }
+ }
+ quotient.push_back(digit);
+ }
+ for (size_t l = 0, r = quotient.size() - 1; l < r; ++l, --r) {
+ int tmp = quotient[l]; quotient[l] = quotient[r]; quotient[r] = tmp;
+ }
+ while (quotient.size() > 1 && quotient.back() == 0) {
+ quotient.pop_back();
+ }
+ if (quotient.empty()) {
+ quotient = {0};
+ }
+ if (remainder.empty()) {
+ remainder = {0};
+ }
+ dividend = quotient;
+ return remainder;
 }
-bool BigInteger::is_negative() const{
-    return negative_;
+BigInteger::BigInteger() : digits_{0}, negative_{false} {}
+BigInteger::BigInteger(int value) : BigInteger(static_cast<long long>(value)) {}
+BigInteger::BigInteger(long long value) {
+ negative_ = (value < 0);
+ unsigned long long abs_value;
+ if (negative_) {
+ abs_value = static_cast<unsigned long long>(-(value + 1)) + 1ULL;
+ } else {
+ abs_value = static_cast<unsigned long long>(value);
+ }
+ do {
+ digits_.push_back(static_cast<int>(abs_value % 10));
+ abs_value /= 10;
+ } while (abs_value > 0);
 }
-
-std::ostream& operator<<(std::ostream& os, const BigInteger& value){
-    if (value.is_negative() && !value.is_zero()){
-        os << '-';
-    }
-    for (int i = value.digits_.size() - 1; i > -1; --i){
-        os << value.digits_[i];
-    }
-    return os;
-}
-std::istream& operator>>(std::istream& is, BigInteger& value){
-    value.digits_.clear();
-    std::string res;
-    size_t start = 0;
-    if (!(is >> res)) return is;
-    if (res[0] == '-') {
-        value.negative_ = true;
-        ++start;
-    } else if (res[0] == '+') {
-        ++start;
-    }
-    while (start < res.size() - 1 && res[start] == '0') {
-        ++start;
-    }
-    for (size_t i = res.size(); i > start; --i) {
-        value.digits_.push_back(res[i - 1] - '0');
-    }
-    return is;
-}
-BigInteger BigInteger::operator-() const{
-    BigInteger a = *this;
-    if (!a.is_zero()) a.negative_ = !a.negative_;
-    return a;
-}
-bool BigInteger::operator<(const BigInteger& rhs) const{
-    if (is_zero() && rhs.is_zero()) return 0;
-    if (is_negative() && !rhs.is_negative()){
-        return 1;
-    }
-    if (!is_negative() && rhs.is_negative()){
-        return 0;
-    }
-    if (digits_.size() < rhs.digits_.size()){
-        return !is_negative();
-    }
-    if (digits_.size() > rhs.digits_.size()){
-        return is_negative();
-    }
-    for (int i = digits_.size() - 1; i > -1; --i){
-        if (digits_[i] < rhs.digits_[i]) return !is_negative();
-        if (digits_[i] > rhs.digits_[i]) return is_negative();
-    }
-    return 0;
-}
-bool BigInteger::operator<=(const BigInteger& rhs) const{
-    return !(rhs < *this);
-}
-bool BigInteger::operator>(const BigInteger& rhs) const{
-    return (rhs < *this);
-}
-bool BigInteger::operator>=(const BigInteger& rhs) const{
-    return !(*this < rhs);
-}
-bool BigInteger::operator==(const BigInteger& rhs) const{
-    return !(*this < rhs || rhs < *this);
-}
-bool BigInteger::operator!=(const BigInteger& rhs) const{
-    return !(*this == rhs);
-}
-void BigInteger::absSum(const BigInteger& other){
-    size_t end = std::max(digits_.size(), other.digits_.size());
-    size_t a_s = digits_.size();
-    size_t b_s = other.digits_.size();
-    int carry = 0;
-    for (size_t i = 0; i < end; ++i){
-        int a = (i >= a_s ? 0 : digits_[i]);
-        int b = (i >= b_s ? 0 : other.digits_[i]);
-        if (i < digits_.size()){
-            digits_[i] = mod(a + b + carry, 10);
-        } else {
-            digits_.push_back(mod(a + b + carry, 10));
-        }
-        carry = (a + b + carry) / 10;
-    }
-    if (carry) digits_.push_back(1);
-}
-void BigInteger::absSub(const BigInteger& other){
-    size_t end = std::max(digits_.size(), other.digits_.size());
-    size_t a_s = digits_.size();
-    size_t b_s = other.digits_.size();
-    int borrow = 0;
-    for (size_t i = 0; i < end; ++i){
-        int a = (i >= a_s ? 0 : digits_[i]);
-        int b = (i >= b_s ? 0 : other.digits_[i]);
-        if (i < digits_.size()){
-            digits_[i] = mod(a - b - borrow, 10);
-        } else {
-            digits_.push_back(mod(a - b - borrow, 10));
-        }
-        borrow = (a - b - borrow) < 0;
-    }
-    for (int i = digits_.size() - 1; i > 0; --i){
-        if (digits_[i] == 0){
-            digits_.pop_back();
-        } else {
-            break;
-        }
-    }
-}
-void BigInteger::absMul(const BigInteger& other){
-    int n = digits_.size();
-    int m = other.digits_.size();
-    std::vector<int> res(n + m, 0);
-    for (int i = 0; i < m; ++i){
-        int carry = 0;
-        for (int j = 0; j < n; ++j){
-            int cur = res[i + j] + digits_[j] * other.digits_[i] + carry;
-            res[i + j] = mod(cur, 10);
-            carry = cur / 10;
-        }
-        if (carry) res[i + n] += carry;
-    }
-    while (res.size() > 1 && res.back() == 0){
-        res.pop_back();
-    }
-    digits_ = res;
-}
-void BigInteger::absDiv(const BigInteger& other){
-    int n = digits_.size();
-    std::vector<int> res(n, 0);
-    BigInteger rem{"0"};
-    for (int i = n - 1; i >= 0; --i){
-        rem.digits_.insert(rem.digits_.begin(), digits_[i]);
-        while (rem.digits_.size() > 1 && rem.digits_.back() == 0){
-            rem.digits_.pop_back();
-        }
-        int q = 0;
-        BigInteger temp = rem;
-        while(!(temp.abs() < other.abs())){
-            temp.absSub(other);
-            ++q;
-        }
-        rem = temp;
-        res[i] = q;
-    }
-    while (res.size() > 1 && res.back() == 0){
-        res.pop_back();
-    }
-    digits_ = res;
-}
-BigInteger& BigInteger::operator+=(const BigInteger& rhs){
-    if (negative_ == rhs.negative_){
-        absSum(rhs);
-    } else if (abs() < rhs.abs()){
-        BigInteger a = rhs;
-        std::swap(a, *this);
-        absSub(a);
-        negative_ = rhs.negative_;
-    } else {
-        absSub(rhs);
-    }
-    if (is_zero()) negative_ = false;
-    return *this;
-}
-BigInteger& BigInteger::operator-=(const BigInteger& rhs){
-    *this += (-rhs);
-    if (is_zero()) negative_ = false;
-    return *this;
-}
-BigInteger& BigInteger::operator*=(const BigInteger& rhs){
-    if (is_zero() || rhs.is_zero()){
-        *this = BigInteger("0");
-        return *this;
-    }
-    absMul(rhs);
-    negative_ = (negative_ != rhs.negative_);
-    return *this;
-}
-BigInteger& BigInteger::operator/=(const BigInteger& rhs){
-    absDiv(rhs);
-    negative_ = (negative_ != rhs.negative_);
-    if (is_zero()) negative_ = false;
-    return *this;
-}
-BigInteger& BigInteger::operator%=(const BigInteger& rhs){
-    *this = *this - (*this / rhs) * rhs;
-    if (is_zero()) negative_ = false;
-    return *this;
-}
-BigInteger BigInteger::operator+(const BigInteger& rhs) const{
-    BigInteger a = *this;
-    a += rhs;
-    return a;
-}
-BigInteger BigInteger::operator-(const BigInteger& rhs) const{
-    BigInteger a = *this;
-    a -= rhs;
-    return a;
-}
-BigInteger BigInteger::operator*(const BigInteger& rhs) const {
-    BigInteger a = *this;
-    a *= rhs;
-    return a;
-}
-BigInteger BigInteger::operator/(const BigInteger& rhs) const {
-    BigInteger a = *this;
-    a /= rhs;
-    return a;
-}
-BigInteger BigInteger::operator%(const BigInteger& rhs) const {
-    BigInteger a = *this;
-    a %= rhs;
-    return a;
-}
-BigInteger& BigInteger::operator++(){
-    *this += BigInteger(1);
-    return *this;
-}
-BigInteger BigInteger::operator++(int){
-    BigInteger temp = *this;
-    *this += BigInteger(1);
-    return temp;
-}
-BigInteger& BigInteger::operator--(){
-    *this -= BigInteger(1);
-    return *this;
-}
-BigInteger BigInteger::operator--(int){
-    BigInteger temp = *this;
-    *this -= BigInteger(1);
-    return temp;
-}
-BigInteger BigInteger::abs() const {
-    BigInteger a = *this;
-    a.negative_ = 0;
-    return a;
-}
-bool BigInteger::is_zero() const{
-    return digits_.size() == 1 && digits_[0] == 0;
+BigInteger::BigInteger(const std::string& str) {
+ if (str.empty()) {
+ digits_ = {0};
+ negative_ = false;
+ return;
+ }
+ size_t start = 0;
+ if (str[0] == '-') {
+ negative_ = true;
+ start = 1;
+ } else {
+ negative_ = false;
+ }
+ for (int i = static_cast<int>(str.length()) - 1;
+ i >= static_cast<int>(start); --i) {
+ digits_.push_back(str[static_cast<size_t>(i)] - '0');
+ }
+ while (digits_.size() > 1 && digits_.back() == 0) {
+ digits_.pop_back();
+ }
+ if (digits_.size() == 1 && digits_[0] == 0) {
+ negative_ = false;
+ }
 }
 std::string BigInteger::to_string() const {
-    std::string ans = "";
-    if (negative_ && !is_zero()) ans += "-";
-    for (int i = (int)digits_.size() - 1; i > -1; --i){
-        ans += (digits_[i] + '0');
-    }
-    return ans;
+ std::string result;
+ if (negative_) {
+ result += '-';
+ }
+ for (int i = static_cast<int>(digits_.size()) - 1; i >= 0; --i) {
+ result += static_cast<char>(digits_[static_cast<size_t>(i)] + '0');
+ }
+ return result;
 }
-
+bool BigInteger::is_zero() const {
+ return digits_.size() == 1 && digits_[0] == 0;
+}
+bool BigInteger::is_negative() const {
+ return negative_;
+}
 BigInteger::operator bool() const {
-    return (*this != BigInteger("0"));
+ return !is_zero();
 }
-// int main(){
-//     BigInteger a{ -__INT_MAX__ - 1};
-    
-// }
+bool BigInteger::operator<(const BigInteger& rhs) const {
+ if (negative_ != rhs.negative_) {
+ return negative_;
+ }
+ int cmp = cmp_abs(digits_, rhs.digits_);
+ return negative_ ? (cmp > 0) : (cmp < 0);
+}
+bool BigInteger::operator>(const BigInteger& rhs) const {
+ return rhs < *this;
+}
+bool BigInteger::operator<=(const BigInteger& rhs) const {
+ return !(rhs < *this);
+}
+bool BigInteger::operator>=(const BigInteger& rhs) const {
+ return !(*this < rhs);
+}
+bool BigInteger::operator==(const BigInteger& rhs) const {
+ return negative_ == rhs.negative_ && digits_ == rhs.digits_;
+}
+bool BigInteger::operator!=(const BigInteger& rhs) const {
+ return !(*this == rhs);
+}
+BigInteger BigInteger::operator-() const {
+ BigInteger result = *this;
+ if (!result.is_zero()) {
+ result.negative_ = !result.negative_;
+ }
+ return result;
+}
+BigInteger& BigInteger::operator++() {
+ *this += BigInteger(1);
+ return *this;
+}
+BigInteger& BigInteger::operator--() {
+ *this -= BigInteger(1);
+ return *this;
+}
+BigInteger BigInteger::operator++(int) {
+ BigInteger old = *this;
+ ++(*this);
+ return old;
+}
+BigInteger BigInteger::operator--(int) {
+ BigInteger old = *this;
+ --(*this);
+ return old;
+}
+BigInteger& BigInteger::operator+=(const BigInteger& rhs) {
+ if (negative_ == rhs.negative_) {
+ add_abs(digits_, rhs.digits_);
+ return *this;
+ }
+ int cmp = cmp_abs(digits_, rhs.digits_);
+ if (cmp == 0) {
+ digits_ = {0};
+ negative_ = false;
+ return *this;
+ }
+ if (cmp > 0) {
+ sub_abs(digits_, rhs.digits_);
+ } else {
+ std::vector<int> temp = rhs.digits_;
+ sub_abs(temp, digits_);
+ digits_ = temp;
+ negative_ = rhs.negative_;
+ }
+ return *this;
+}
+BigInteger BigInteger::operator+(const BigInteger& rhs) const {
+ BigInteger result = *this;
+ result += rhs;
+ return result;
+}
+BigInteger& BigInteger::operator-=(const BigInteger& rhs) {
+ *this += (-rhs);
+ return *this;
+}
+BigInteger BigInteger::operator-(const BigInteger& rhs) const {
+ BigInteger result = *this;
+ result -= rhs;
+ return result;
+}
+BigInteger& BigInteger::operator*=(const BigInteger& rhs) {
+ bool result_negative = (negative_ != rhs.negative_);
+ mul_abs(digits_, rhs.digits_);
+ negative_ = is_zero() ? false : result_negative;
+ return *this;
+}
+BigInteger BigInteger::operator*(const BigInteger& rhs) const {
+ BigInteger result = *this;
+ result *= rhs;
+ return result;
+}
+BigInteger& BigInteger::operator/=(const BigInteger& rhs) {
+ if (rhs.is_zero()) {
+ return *this;
+ }
+ bool result_negative = (negative_ != rhs.negative_);
+ if (cmp_abs(digits_, rhs.digits_) < 0) {
+ digits_ = {0};
+ negative_ = false;
+ return *this;
+ }
+ std::vector<int> divisor = rhs.digits_;
+ div_mod_abs(digits_, divisor);
+ negative_ = is_zero() ? false : result_negative;
+ return *this;
+}
+BigInteger BigInteger::operator/(const BigInteger& rhs) const {
+ BigInteger result = *this;
+ result /= rhs;
+ return result;
+}
+BigInteger& BigInteger::operator%=(const BigInteger& rhs) {
+ if (rhs.is_zero()) {
+ return *this;
+ }
+ bool remainder_negative = negative_;
+ if (cmp_abs(digits_, rhs.digits_) < 0) {
+ return *this;
+ }
+ std::vector<int> divisor = rhs.digits_;
+ digits_ = div_mod_abs(digits_, divisor);
+ negative_ = is_zero() ? false : remainder_negative;
+ return *this;
+}
+BigInteger BigInteger::operator%(const BigInteger& rhs) const {
+ BigInteger result = *this;
+ result %= rhs;
+ return result;
+}
+std::ostream& operator<<(std::ostream& os, const BigInteger& value) {
+ os << value.to_string();
+ return os;
+}
+std::istream& operator>>(std::istream& is, BigInteger& value) {
+ std::string s;
+ is >> s;
+ value = BigInteger(s);
+ return is;
+}
